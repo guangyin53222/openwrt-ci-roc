@@ -311,30 +311,6 @@ if package_enabled luci-app-oaf open-app-filter oaf; then
   echo "✅ OAF packages extracted (luci-app-oaf + open-app-filter + oaf)"
 fi
 
-# ===================== Athena LED (v2.4.0) =====================
-if package_enabled luci-app-athena-led luci-i18n-athena-led-zh-cn athena-led; then
-  echo "============================================"
-  echo " Adding JDC-AX6600 Athena LED Controller (v2.4.0)"
-  echo "============================================"
-
-  rm -rf package/JDC-AX6600-Athena-LED-Controller
-  clone_repository https://github.com/unraveloop/JDC-AX6600-Athena-LED-Controller.git v2.4.0 package/JDC-AX6600-Athena-LED-Controller
-
-  if [ -f "package/JDC-AX6600-Athena-LED-Controller/athena-led/Makefile" ]; then
-    PKG_VER=$(grep 'PKG_VERSION' \
-      package/JDC-AX6600-Athena-LED-Controller/athena-led/Makefile \
-      | head -1 | cut -d'=' -f2)
-    echo "✅ athena-led Makefile PKG_VERSION=${PKG_VER}"
-  else
-    echo "❌ athena-led Makefile not found! Abort."
-    exit 1
-  fi
-
-  chmod +x \
-    package/JDC-AX6600-Athena-LED-Controller/athena-led/root/etc/init.d/athena_led \
-    package/JDC-AX6600-Athena-LED-Controller/athena-led/root/usr/sbin/athena-led \
-    2>/dev/null || true
-fi
 
 # ===================== PassWall / PassWall2 / OpenClash =====================
 if package_enabled luci-app-passwall luci-app-passwall2; then
