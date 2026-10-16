@@ -16,7 +16,6 @@ esac
 
 resolve_config_file() {
   local config_file="$1"
-
   if [ -f "$config_file" ]; then
     printf '%s\n' "$config_file"
   elif [ -f "$WORKSPACE/$config_file" ]; then
@@ -31,7 +30,6 @@ CONFIG_FILES=()
 if [ -n "$DEVICE_CONFIG_FILE" ]; then
   CONFIG_FILES+=("$(resolve_config_file "$DEVICE_CONFIG_FILE")")
 elif [ -f .config ]; then
-  # Keep direct invocations compatible with an existing OpenWrt .config.
   CONFIG_FILES+=("$PWD/.config")
 else
   echo "Error: pass the device config as the first argument or CONFIG_FILE" >&2
@@ -41,7 +39,6 @@ CONFIG_FILES+=("$(resolve_config_file "$GENERAL_CONFIG_FILE")")
 
 config_symbol_enabled() {
   local symbol="$1"
-
   awk -v symbol="$symbol" '
     { sub(/\r$/, "") }
     $0 == symbol "=y" || $0 == symbol "=m" { enabled = 1; next }
@@ -52,7 +49,6 @@ config_symbol_enabled() {
 
 target_device_package_enabled() {
   local package_name="$1"
-
   awk -v package_name="$package_name" '
     { sub(/\r$/, "") }
     /^CONFIG_TARGET_DEVICE_PACKAGES_[^=]+="/ {
@@ -61,9 +57,7 @@ target_device_package_enabled() {
       sub(/"$/, "", packages)
       count = split(packages, values, /[[:space:]]+/)
       for (i = 1; i <= count; i++) {
-        if (values[i] == package_name) {
-          found = 1
-        }
+        if (values[i] == package_name) { found = 1 }
       }
     }
     END { exit(found ? 0 : 1) }
@@ -72,13 +66,11 @@ target_device_package_enabled() {
 
 package_enabled() {
   local package_name
-
   for package_name in "$@"; do
     if config_symbol_enabled "CONFIG_PACKAGE_$package_name" || target_device_package_enabled "$package_name"; then
       return 0
     fi
   done
-
   return 1
 }
 
@@ -86,19 +78,16 @@ clone_with_retry() {
   local target_dir="$1"
   local attempt
   shift
-
   for ((attempt = 1; attempt <= GIT_CLONE_RETRY_COUNT; attempt++)); do
     rm -rf "$target_dir"
     if git clone "$@" "$target_dir"; then
       return 0
     fi
-
     if [ "$attempt" -lt "$GIT_CLONE_RETRY_COUNT" ]; then
       echo "Git clone failed; retrying ($((attempt + 1))/$GIT_CLONE_RETRY_COUNT): ${*: -1}" >&2
       sleep $((attempt * 2))
     fi
   done
-
   echo "Error: git clone failed after $GIT_CLONE_RETRY_COUNT attempts: ${*: -1}" >&2
   return 1
 }
@@ -107,9 +96,7 @@ record_git_revision() {
   local repo_url="$1"
   local branch="$2"
   local checkout_dir="$3"
-  local commit
-  local revision
-
+  local commit revision
   commit="$(git -C "$checkout_dir" rev-parse HEAD)"
   printf -v revision '%s\t%s\t%s' "$repo_url" "$branch" "$commit"
   grep -Fqx -- "$revision" "$THIRD_PARTY_SOURCES_FILE" || printf '%s\n' "$revision" >> "$THIRD_PARTY_SOURCES_FILE"
@@ -119,7 +106,6 @@ clone_repository() {
   local repo_url="$1"
   local branch="$2"
   local target_dir="$3"
-
   clone_with_retry "$target_dir" \
     --depth=1 \
     --no-tags \
@@ -128,6 +114,15 @@ clone_repository() {
     "$repo_url"
   record_git_revision "$repo_url" "$branch" "$target_dir"
 }
+
+# ===================== iStore（官方标准方式 ✅） =====================
+if ! grep -q "src-git istore" feeds.conf.default 2>/dev/null; then
+  echo "Adding iStore feed to feeds.conf.default..."
+  echo 'src-git istore https://github.com/linkease/istore;main' >> feeds.conf.default
+  echo "✅ iStore feed added."
+else
+  echo "ℹ️  iStore feed already exists in feeds.conf.default, skipping."
+fi
 
 mkdir -p "$(dirname "$THIRD_PARTY_SOURCES_FILE")"
 printf 'Repository\tBranch\tCommit\n' > "$THIRD_PARTY_SOURCES_FILE"
@@ -151,38 +146,19 @@ sed -i "s#_('Firmware Version'), (L\.isObject(boardinfo\.release) ? boardinfo\.r
                 }, [ 'Built by Roc $(date "+%Y-%m-%d %H:%M:%S")' ])\n \
             ]),#" "$luci_system_js"
 
-# 调整NSS驱动q6_region内存区域预留大小（ipq6018.dtsi默认预留85MB，ipq6018-512m.dtsi默认预留55MB，带WiFi必须至少预留54MB，以下分别是改成预留16MB、32MB、64MB和96MB）
-# sed -i 's/reg = <0x0 0x4ab00000 0x0 0x[0-9a-f]\+>/reg = <0x0 0x4ab00000 0x0 0x01000000>/' target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq6018-512m.dtsi
-# sed -i 's/reg = <0x0 0x4ab00000 0x0 0x[0-9a-f]\+>/reg = <0x0 0x4ab00000 0x0 0x02000000>/' target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq6018-512m.dtsi
-# sed -i 's/reg = <0x0 0x4ab00000 0x0 0x[0-9a-f]\+>/reg = <0x0 0x4ab00000 0x0 0x04000000>/' target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq6018-512m.dtsi
-# sed -i 's/reg = <0x0 0x4ab00000 0x0 0x[0-9a-f]\+>/reg = <0x0 0x4ab00000 0x0 0x06000000>/' target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq6018-512m.dtsi
-
-# 调节IPQ60XX的1.5GHz频率电压(从0.9375V提高到0.95V，过低可能导致不稳定，过高可能增加功耗和发热，具体数值需要根据实际情况调整)
-# sed -i 's/opp-microvolt = <937500>;/opp-microvolt = <950000>;/' target/linux/qualcommax/patches-6.12/0038-v6.16-arm64-dts-qcom-ipq6018-add-1.5GHz-CPU-Frequency.patch
-
-# Git稀疏克隆，只克隆指定目录到本地
+# Git稀疏克隆
 git_sparse_clone() {
   local branch="$1"
   local repourl="$2"
   local repodir
   local sparse_path
   shift 2
-
   repodir="$(basename "${repourl%.git}")"
   clone_with_retry "$repodir" \
-    --depth=1 \
-    --no-tags \
-    --branch "$branch" \
-    --single-branch \
-    --filter=blob:none \
-    --sparse \
-    "$repourl"
-  (
-    cd "$repodir"
-    git sparse-checkout set "$@"
-  )
+    --depth=1 --no-tags --branch "$branch" --single-branch \
+    --filter=blob:none --sparse "$repourl"
+  ( cd "$repodir" && git sparse-checkout set "$@" )
   record_git_revision "$repourl" "$branch" "$repodir"
-
   for sparse_path in "$@"; do
     rm -rf "package/$(basename "$sparse_path")"
     mv "$repodir/$sparse_path" package/
@@ -190,11 +166,12 @@ git_sparse_clone() {
   rm -rf "$repodir"
 }
 
-# Aria2 & nginx & Go & DDNS & frp & UPnP & Wol
+# ===================== Golang =====================
 rm -rf feeds/packages/lang/golang
 git_sparse_clone master https://github.com/laipeng668/packages lang/golang
 mv package/golang feeds/packages/lang/golang
 
+# ===================== Aria2 / nginx / DDNS / frp / UPnP / WoL =====================
 if package_enabled luci-app-aria2 aria2; then
   rm -rf feeds/packages/net/aria2
   git_sparse_clone aria2 https://github.com/laipeng668/packages net/aria2
@@ -224,8 +201,7 @@ if package_enabled luci-app-ddns; then
 fi
 
 if package_enabled frp frpc frps luci-app-frpc luci-app-frps; then
-  rm -rf \
-    feeds/packages/net/frp
+  rm -rf feeds/packages/net/frp
   git_sparse_clone frp-binary https://github.com/laipeng668/packages net/frp
   mv package/frp feeds/packages/net/frp
 fi
@@ -264,7 +240,19 @@ if package_enabled luci-app-wol; then
   mv package/luci-app-wol feeds/luci/applications/luci-app-wol
 fi
 
-# Themes and standalone applications. A config application pulls in its theme as a dependency.
+# ===================== Harbor File =====================
+if package_enabled luci-app-harbor-file; then
+  rm -rf package/luci-app-harbor-file
+  clone_repository https://github.com/destan19/luci-app-harbor-file main package/luci-app-harbor-file
+fi
+
+# ===================== tcpdump =====================
+if package_enabled luci-app-tcpdump; then
+  rm -rf package/luci-app-tcpdump
+  clone_repository https://github.com/KFERMercer/luci-app-tcpdump.git master package/luci-app-tcpdump
+fi
+
+# ===================== Themes =====================
 if package_enabled luci-theme-argon luci-app-argon-config; then
   rm -rf feeds/luci/themes/luci-theme-argon
   clone_repository https://github.com/jerrykuku/luci-theme-argon master feeds/luci/themes/luci-theme-argon
@@ -283,6 +271,7 @@ if package_enabled luci-app-aurora-config; then
   clone_repository https://github.com/eamonxg/luci-app-aurora-config master feeds/luci/applications/luci-app-aurora-config
 fi
 
+# ===================== 独立应用 =====================
 if package_enabled luci-app-openlist2 openlist2; then
   clone_repository https://github.com/laipeng668/luci-app-openlist2 main package/openlist2
 fi
@@ -296,24 +285,59 @@ if package_enabled luci-app-wechatpush; then
   clone_repository https://github.com/tty228/luci-app-wechatpush master package/luci-app-wechatpush
 fi
 
-if package_enabled luci-app-oaf open-app-filter; then
-  rm -rf feeds/luci/applications/luci-app-appfilter feeds/packages/net/open-app-filter
-  clone_repository https://github.com/destan19/OpenAppFilter.git master package/OpenAppFilter
-fi
-
 if package_enabled luci-app-gecoosac gecoosac; then
   clone_repository https://github.com/laipeng668/luci-app-gecoosac main package/luci-app-gecoosac
 fi
 
-if package_enabled luci-app-athena-led luci-i18n-athena-led-zh-cn; then
-  clone_repository https://github.com/NONGFAH/luci-app-athena-led main package/luci-app-athena-led
-  chmod +x package/luci-app-athena-led/root/etc/init.d/athena_led package/luci-app-athena-led/root/usr/sbin/athena-led
+# ===================== OAF（OpenAppFilter） =====================
+if package_enabled luci-app-oaf open-app-filter oaf; then
+  echo "============================================"
+  echo " Adding OpenAppFilter (OAF)"
+  echo "============================================"
+
+  rm -rf package/OpenAppFilter \
+         package/luci-app-oaf \
+         package/open-app-filter \
+         package/oaf
+
+  clone_repository https://github.com/destan19/OpenAppFilter.git master package/OpenAppFilter
+
+  # 平铺三个子包，确保 feeds install 正确识别
+  mv package/OpenAppFilter/luci-app-oaf    package/luci-app-oaf
+  mv package/OpenAppFilter/open-app-filter package/open-app-filter
+  mv package/OpenAppFilter/oaf             package/oaf
+
+  rm -rf package/OpenAppFilter
+  echo "✅ OAF packages extracted (luci-app-oaf + open-app-filter + oaf)"
 fi
 
-### PassWall & OpenClash ###
+# ===================== Athena LED (v2.4.0) =====================
+if package_enabled luci-app-athena-led luci-i18n-athena-led-zh-cn athena-led; then
+  echo "============================================"
+  echo " Adding JDC-AX6600 Athena LED Controller (v2.4.0)"
+  echo "============================================"
 
+  rm -rf package/JDC-AX6600-Athena-LED-Controller
+  clone_repository https://github.com/unraveloop/JDC-AX6600-Athena-LED-Controller.git v2.4.0 package/JDC-AX6600-Athena-LED-Controller
+
+  if [ -f "package/JDC-AX6600-Athena-LED-Controller/athena-led/Makefile" ]; then
+    PKG_VER=$(grep 'PKG_VERSION' \
+      package/JDC-AX6600-Athena-LED-Controller/athena-led/Makefile \
+      | head -1 | cut -d'=' -f2)
+    echo "✅ athena-led Makefile PKG_VERSION=${PKG_VER}"
+  else
+    echo "❌ athena-led Makefile not found! Abort."
+    exit 1
+  fi
+
+  chmod +x \
+    package/JDC-AX6600-Athena-LED-Controller/athena-led/root/etc/init.d/athena_led \
+    package/JDC-AX6600-Athena-LED-Controller/athena-led/root/usr/sbin/athena-led \
+    2>/dev/null || true
+fi
+
+# ===================== PassWall / PassWall2 / OpenClash =====================
 if package_enabled luci-app-passwall luci-app-passwall2; then
-  # 移除 OpenWrt Feeds 自带的核心库
   rm -rf feeds/packages/net/{xray-core,v2ray-geodata,sing-box,chinadns-ng,dns2socks,hysteria,ipt2socks,microsocks,naiveproxy,shadowsocks-libev,shadowsocks-rust,shadowsocksr-libev,simple-obfs,tcping,trojan-plus,tuic-client,v2ray-plugin,xray-plugin,geoview,shadow-tls}
   clone_repository https://github.com/Openwrt-Passwall/openwrt-passwall-packages main package/passwall-packages
 fi
@@ -333,8 +357,6 @@ if package_enabled luci-app-openclash; then
   clone_repository https://github.com/vernesong/OpenClash master package/luci-app-openclash
 fi
 
-# 清理 PassWall 的 chnlist 规则文件
-# echo "baidu.com"  > package/luci-app-passwall/luci-app-passwall/root/usr/share/passwall/rules/chnlist
-
+# ===================== 更新并安装 feeds =====================
 ./scripts/feeds update -i -a
 ./scripts/feeds install -a
